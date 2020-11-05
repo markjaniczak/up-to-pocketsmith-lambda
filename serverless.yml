@@ -1,0 +1,16 @@
+service: up-pocketsmith-lambda
+
+frameworkVersion: '2'
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  region: ap-southeast-2
+
+functions:
+  forward_transaction:
+    handler: dist/index.handle
+    events:
+        - http:
+            path: forward_transaction
+            method: POST
