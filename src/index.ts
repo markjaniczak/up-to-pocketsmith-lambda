@@ -1,6 +1,6 @@
-import { APIGatewayEvent } from "aws-lambda";
-import Axios from "axios";
-import { createHmac } from "crypto";
+import { APIGatewayEvent } from 'aws-lambda';
+import Axios from 'axios';
+import { createHmac } from 'crypto';
 
 interface UpObject<Attributes extends any> {
   type: string;
@@ -20,29 +20,37 @@ interface UpObject<Attributes extends any> {
 }
 
 interface UpWebhookEvent {
-  eventType: "TRANSACTION_CREATED" | "TRANSACTION_SETTLED" | "TRANSACTION_DELETED" | "PING";
+  eventType: 'TRANSACTION_CREATED' | 'TRANSACTION_SETTLED' | 'TRANSACTION_DELETED' | 'PING';
   /**
    * ISO8601 datetime String
    */
   createdAt: string;
 }
 
+interface UpMoneyObject {
+  /**
+   * ISO4217 Currency Code
+   */
+  currencyCode: string;
+  /**
+   * String representation of two decimal precision float
+   */
+  value: string;
+  valueInBaseUnits: number;
+}
+
+interface UpRoundUp {
+  amount: UpMoneyObject;
+  boostPortion: Nullable<UpMoneyObject>;
+}
+
 interface UpTransaction {
-  status: "HELD" | "SETTLED";
+  status: 'HELD' | 'SETTLED';
   rawText: Nullable<string>;
   description: string;
   message: Nullable<string>;
-  amount: {
-    /**
-     * ISO4217 Currency Code
-     */
-    currencyCode: string;
-    /**
-     * String representation of two decimal precision float
-     */
-    value: string;
-    valueInBaseUnits: number;
-  };
+  amount: UpMoneyObject;
+  roundUp: Nullable<UpRoundUp>;
   /**
    * ISO8601 datetime String
    */
@@ -73,10 +81,27 @@ const addTransaction = async (transaction: UpObject<UpTransaction>) => {
     },
     {
       headers: {
-        "X-Developer-Key": POCKETSMITH_API_KEY,
+        'X-Developer-Key': POCKETSMITH_API_KEY,
       },
     }
   );
+
+  if (attributes.roundUp) {
+    await Axios.post(
+      `https://api.pocketsmith.com/v2/transaction_accounts/${pocketsmithAccount}/transactions`,
+      {
+        payee: 'Round Up',
+        amount: attributes.roundUp.amount.valueInBaseUnits / 100,
+        date: attributes.createdAt,
+        note: transaction.id,
+      },
+      {
+        headers: {
+          'X-Developer-Key': POCKETSMITH_API_KEY,
+        },
+      }
+    );
+  }
 };
 
 const removeTransaction = async (transaction: UpObject<UpTransaction>) => {
@@ -89,16 +114,20 @@ const removeTransaction = async (transaction: UpObject<UpTransaction>) => {
       search: transaction.id,
     },
     headers: {
-      "X-Developer-Key": POCKETSMITH_API_KEY,
+      'X-Developer-Key': POCKETSMITH_API_KEY,
     },
   });
 
   if (transactions.data.length) {
-    await Axios.delete(`https://api.pocketsmith.com/v2/transactions/${transactions.data[0].id}`, {
-      headers: {
-        "X-Developer-Key": POCKETSMITH_API_KEY
-      }
-    })
+    await Promise.all(
+      transactions.data.map(({ id }: { id: string }) =>
+        Axios.delete(`https://api.pocketsmith.com/v2/transactions/${id}`, {
+          headers: {
+            'X-Developer-Key': POCKETSMITH_API_KEY,
+          },
+        })
+      )
+    );
   }
 };
 
@@ -110,13 +139,13 @@ export const handle = async (event: APIGatewayEvent): Promise<any> => {
   }
 
   const isAuthentic =
-    createHmac("sha256", UP_SECRET_KEY).update(event.body).digest("hex") ===
-    event.headers["X-Up-Authenticity-Signature"];
+    createHmac('sha256', UP_SECRET_KEY).update(event.body).digest('hex') ===
+    event.headers['X-Up-Authenticity-Signature'];
 
   if (!isAuthentic) {
     return {
       statusCode: 401,
-      body: "Could not verify webhook",
+      body: 'Could not verify webhook',
     };
   }
 
@@ -124,10 +153,10 @@ export const handle = async (event: APIGatewayEvent): Promise<any> => {
 
   const eventType = json.data.attributes.eventType;
 
-  if (!["TRANSACTION_DELETED", "TRANSACTION_CREATED"].includes(eventType)) {
+  if (!['TRANSACTION_DELETED', 'TRANSACTION_CREATED'].includes(eventType)) {
     return {
       statusCode: 200,
-      body: "⛔",
+      body: '⛔',
     };
   }
 
@@ -137,12 +166,12 @@ export const handle = async (event: APIGatewayEvent): Promise<any> => {
       `https://api.up.com.au/api/v1/transactions/${json.data.relationships.transaction.data.id}/`,
       {
         headers: {
-          "Authorization": `Bearer ${UP_BEARER_TOKEN}`,
+          Authorization: `Bearer ${UP_BEARER_TOKEN}`,
         },
       }
     );
 
-    if (eventType === "TRANSACTION_CREATED") {
+    if (eventType === 'TRANSACTION_CREATED') {
       await addTransaction(transaction.data.data);
     } else {
       await removeTransaction(transaction.data.data);
@@ -156,6 +185,6 @@ export const handle = async (event: APIGatewayEvent): Promise<any> => {
 
   return {
     statusCode: 200,
-    body: "👌",
+    body: '👌',
   };
 };
